@@ -5,6 +5,10 @@ CPE/CSC 471 Lab base code Wood/Dunn/Eckhardt
 #include <iostream>
 #include <glad/glad.h>
 #define STB_IMAGE_IMPLEMENTATION
+#define _USE_MATH_DEFINES
+#include <cmath>
+#include <time.h>
+#include <algorithm>
 #include "stb_image.h"
 #include "GLSL.h"
 #include "Program.h"
@@ -18,12 +22,12 @@ CPE/CSC 471 Lab base code Wood/Dunn/Eckhardt
 using namespace std;
 using namespace glm;
 shared_ptr<Shape> shape;
-
+constexpr int NUM_BILLBOARDS = 200;
 
 double get_last_elapsed_time()
 {
 	static double lasttime = glfwGetTime();
-	double actualtime =glfwGetTime();
+	double actualtime = glfwGetTime();
 	double difference = actualtime- lasttime;
 	lasttime = actualtime;
 	return difference;
@@ -32,10 +36,10 @@ class camera
 {
 public:
 	glm::vec3 pos, rot;
-	int w, a, s, d;
+	int w, a, s, d, i, m, j, l;
 	camera()
 	{
-		w = a = s = d = 0;
+		w = a = s = d = i = m = j = l = 0;
 		pos = rot = glm::vec3(0, 0, 0);
 	}
 	glm::mat4 process(double ftime)
@@ -43,28 +47,44 @@ public:
 		float speed = 0;
 		if (w == 1)
 		{
-			speed = 10*ftime;
+			speed = 3*ftime;
 		}
 		else if (s == 1)
 		{
-			speed = -10*ftime;
+			speed = -3*ftime;
 		}
-		float yangle=0;
+		float yangle = 0, xangle = 0, zangle = 0;
 		if (a == 1)
 			yangle = -3*ftime;
 		else if(d==1)
 			yangle = 3*ftime;
+		if (j == 1)
+			zangle = -3 * ftime;
+		else if (l == 1)
+			zangle = 3 * ftime;
+		if (i == 1)
+			xangle = -3 * ftime;
+		else if (m == 1)
+			xangle = 3 * ftime;
 		rot.y += yangle;
-		glm::mat4 R = glm::rotate(glm::mat4(1), rot.y, glm::vec3(0, 1, 0));
+		rot.x += xangle;
+		rot.z += zangle;
+		glm::mat4 Ry = glm::rotate(glm::mat4(1), rot.y, glm::vec3(0, 1, 0));
+		glm::mat4 Rx = glm::rotate(glm::mat4(1), rot.x, glm::vec3(1, 0, 0));
+		glm::mat4 Rz = glm::rotate(glm::mat4(1), rot.z, glm::vec3(0, 0, 1));
 		glm::vec4 dir = glm::vec4(0, 0, speed,1);
-		dir = dir*R;
+		dir = dir * Ry * Rx * Rz;
 		pos += glm::vec3(dir.x, dir.y, dir.z);
 		glm::mat4 T = glm::translate(glm::mat4(1), pos);
-		return R*T;
+		return Rx * Ry * Rz * T;
 	}
 };
 
 camera mycam;
+bool farFirstCompare(vec3 p1, vec3 p2)
+{
+	return distance(p1, -mycam.pos) > distance(p2, -mycam.pos);
+}
 
 class Application : public EventCallbacks
 {
@@ -86,13 +106,14 @@ public:
 	GLuint Texture;
 	GLuint Texture2;
 
+	std::shared_ptr<std::vector<glm::vec3>> positions;
+
 	void keyCallback(GLFWwindow *window, int key, int scancode, int action, int mods)
 	{
 		if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
 		{
 			glfwSetWindowShouldClose(window, GL_TRUE);
-		}
-		
+		}		
 		if (key == GLFW_KEY_W && action == GLFW_PRESS)
 		{
 			mycam.w = 1;
@@ -124,6 +145,38 @@ public:
 		if (key == GLFW_KEY_D && action == GLFW_RELEASE)
 		{
 			mycam.d = 0;
+		}
+		if (key == GLFW_KEY_I && action == GLFW_PRESS)
+		{
+			mycam.i = 1;
+		}
+		if (key == GLFW_KEY_I && action == GLFW_RELEASE)
+		{
+			mycam.i = 0;
+		}
+		if (key == GLFW_KEY_M && action == GLFW_PRESS)
+		{
+			mycam.m = 1;
+		}
+		if (key == GLFW_KEY_M && action == GLFW_RELEASE)
+		{
+			mycam.m = 0;
+		}
+		if (key == GLFW_KEY_J && action == GLFW_PRESS)
+		{
+			mycam.j = 1;
+		}
+		if (key == GLFW_KEY_J && action == GLFW_RELEASE)
+		{
+			mycam.j = 0;
+		}
+		if (key == GLFW_KEY_L && action == GLFW_PRESS)
+		{
+			mycam.l = 1;
+		}
+		if (key == GLFW_KEY_L && action == GLFW_RELEASE)
+		{
+			mycam.l = 0;
 		}
 	}
 
@@ -160,8 +213,7 @@ public:
 		glViewport(0, 0, width, height);
 	}
 
-	/*Note that any gl calls must always happen after a GL state is initialized */
-	void initGeom()
+	void initBillBoard()
 	{
 		//generate the VAO
 		glGenVertexArrays(1, &VertexArrayID);
@@ -232,15 +284,27 @@ public:
 			2, 3, 0,
 		};
 		glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(cube_elements), cube_elements, GL_STATIC_DRAW);
-
-
-
 		glBindVertexArray(0);
+	}
+	void initPositions(int numPositions, float scale)
+	{
+		positions = make_shared<std::vector<glm::vec3>>();
+		for (int i = 0; i < numPositions; i++)
+			positions->push_back(vec3(mkRand(0.5, -0.5) * scale, mkRand(0.5, -0.5) * scale, mkRand(0.5, -0.5) * scale));
+	}
+	float mkRand(float HI, float LO)
+	{
+		return LO + static_cast <float> (rand()) / (static_cast <float> (RAND_MAX / (HI - LO)));
+	}
+
+	void initGeom()
+	{
+		initBillBoard();
+		initPositions(NUM_BILLBOARDS, 5);
 
 		string resourceDirectory = "../resources" ;
 		// Initialize mesh.
 		shape = make_shared<Shape>();
-		//shape->loadMesh(resourceDirectory + "/t800.obj");
 		shape->loadMesh(resourceDirectory + "/sphere.obj");
 		shape->resize();
 		shape->init();
@@ -249,7 +313,7 @@ public:
 		char filepath[1000];
 
 		//texture 1
-		string str = resourceDirectory + "/mario.png";
+		string str = resourceDirectory + "/clouds.jpg";
 		strcpy(filepath, str.c_str());
 		unsigned char* data = stbi_load(filepath, &width, &height, &channels, 4);
 		glGenTextures(1, &Texture);
@@ -283,7 +347,6 @@ public:
 		glUseProgram(prog->pid);
 		glUniform1i(Tex1Location, 0);
 		glUniform1i(Tex2Location, 1);
-
 	}
 
 	//General OGL initialization - set OGL state here
@@ -293,10 +356,8 @@ public:
 
 		// Set background color.
 		glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
-		// Enable z-buffer test.
-		glEnable(GL_DEPTH_TEST);
-		//glDisable(GL_DEPTH_TEST);
-		// Initialize the GLSL program.
+		glDisable(GL_DEPTH_TEST);
+
 		prog = std::make_shared<Program>();
 		prog->setVerbose(true);
 		prog->setShaderNames(resourceDirectory + "/shader_vertex.glsl", resourceDirectory + "/shader_fragment.glsl");
@@ -313,7 +374,7 @@ public:
 		prog->addAttribute("vertNor");
 		prog->addAttribute("vertTex");
 
-
+		//sky
 		psky = std::make_shared<Program>();
 		psky->setVerbose(true);
 		psky->setShaderNames(resourceDirectory + "/skyvertex.glsl", resourceDirectory + "/skyfrag.glsl");
@@ -325,7 +386,6 @@ public:
 		psky->addUniform("P");
 		psky->addUniform("V");
 		psky->addUniform("M");
-		psky->addUniform("campos");
 		psky->addAttribute("vertPos");
 		psky->addAttribute("vertNor");
 		psky->addAttribute("vertTex");
@@ -351,115 +411,70 @@ public:
 
 		// Clear framebuffer.
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-		// Create the matrix stacks - please leave these alone for now
 		
-		glm::mat4 V, M, P; //View, Model and Perspective matrix
+		mat4 V, M, P;
 		V = mycam.process(frametime);
-		M = glm::mat4(1);
-		// Apply orthographic projection....
-		P = glm::ortho(-1 * aspect, 1 * aspect, -1.0f, 1.0f, -2.0f, 100.0f);		
-		if (width < height)
-			{
-			P = glm::ortho(-1.0f, 1.0f, -1.0f / aspect,  1.0f / aspect, -2.0f, 100.0f);
-			}
-		// ...but we overwrite it (optional) with a perspective projection.
-		P = glm::perspective((float)(3.14159 / 4.), (float)((float)width/ (float)height), 0.1f, 1000.0f); //so much type casting... GLM metods are quite funny ones
-		float sangle = 3.1415926 / 2.;
-		glm::mat4 RotateXSky = glm::rotate(glm::mat4(1.0f), sangle, glm::vec3(1.0f, 0.0f, 0.0f));
-		glm::vec3 camp = -mycam.pos;
-		glm::mat4 TransSky = glm::translate(glm::mat4(1.0f), camp);
-		glm::mat4 SSky = glm::scale(glm::mat4(1.0f), glm::vec3(0.8f, 0.8f, 0.8f));
-
-		M = TransSky * RotateXSky * SSky;
-
-		// Draw the box using GLSL.
-		psky->bind();
-
+		P = perspective((float)(3.14159 / 4.), (float)((float)width/ (float)height), 0.1f, 1000.0f); //so much type casting... GLM metods are quite funny ones
 		
-		//send the matrices to the shaders
+		psky->bind();
 		glUniformMatrix4fv(psky->getUniform("P"), 1, GL_FALSE, &P[0][0]);
 		glUniformMatrix4fv(psky->getUniform("V"), 1, GL_FALSE, &V[0][0]);
+		
+		mat4 S = glm::scale(mat4(1.0f), vec3(0.3f, 0.3f, 0.3f));
+		mat4 RX = rotate(mat4(1.0f), (float)M_PI / 2, vec3(1.0f, 0.0f, 0.0f));
+		mat4 T = translate(mat4(1), -mycam.pos);
+		M = T * RX * S;
+		
 		glUniformMatrix4fv(psky->getUniform("M"), 1, GL_FALSE, &M[0][0]);
-		glUniform3fv(psky->getUniform("campos"), 1, &mycam.pos[0]);
-
 		glActiveTexture(GL_TEXTURE0);
 		glBindTexture(GL_TEXTURE_2D, Texture2);
 		glDisable(GL_DEPTH_TEST);
 		shape->draw(psky, FALSE);
-		glEnable(GL_DEPTH_TEST);
-	
+		glDisable(GL_DEPTH_TEST);
 		psky->unbind();
 
-		//animation with the model matrix:
-		static float w = 0.0;
-		w += 1.0 * frametime;//rotation angle
-		float trans = 0;// sin(t) * 2;
-		glm::mat4 RotateY = glm::rotate(glm::mat4(1.0f), w, glm::vec3(0.0f, 1.0f, 0.0f));
-		float angle = -3.1415926/2.0;
-		glm::mat4 RotateX = glm::rotate(glm::mat4(1.0f), angle, glm::vec3(1.0f, 0.0f, 0.0f));
-		glm::mat4 TransZ = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -3 + trans));
-		glm::mat4 S = glm::scale(glm::mat4(1.0f), glm::vec3(0.8f, 0.8f, 0.8f));
-
-		M =  TransZ * RotateY * RotateX * S;
-
-		// Draw the box using GLSL.
 		prog->bind();
-
-		
-		//send the matrices to the shaders
 		glUniformMatrix4fv(prog->getUniform("P"), 1, GL_FALSE, &P[0][0]);
 		glUniformMatrix4fv(prog->getUniform("V"), 1, GL_FALSE, &V[0][0]);
-		glUniformMatrix4fv(prog->getUniform("M"), 1, GL_FALSE, &M[0][0]);
-		glUniform3fv(prog->getUniform("campos"), 1, &mycam.pos[0]);
-
-		
-	
+		glUniform3f(prog->getUniform("campos"), -mycam.pos.x, -mycam.pos.y, -mycam.pos.z);
 		glBindVertexArray(VertexArrayID);
-		//actually draw from vertex 0, 3 vertices
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, IndexBufferIDBox);
-		//glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_SHORT, (void*)0);
-		mat4 Vi = glm::transpose(V);
+		mat4 Vi = transpose(V);
 		Vi[0][3] = 0;
 		Vi[1][3] = 0;
 		Vi[2][3] = 0;
 		glActiveTexture(GL_TEXTURE0);
 		glBindTexture(GL_TEXTURE_2D, Texture);
-		for (int z = 0; z < 5; z++)
+
+		S = scale(mat4(1.0f), vec3(0.8f, 0.8f, 0.8f));
+		sort(positions->begin(), positions->end(), farFirstCompare);
+		for (int i = 0; i < positions->size(); i++)
 		{
-			glm::mat4 TransZ = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f+z, 0.0f, -3 - z));
-
-			M = TransZ * S* Vi;
-
-
+			mat4 TransZ = translate(mat4(1.0f), positions->at(i));
+			M = TransZ * S * Vi; 
 			glUniformMatrix4fv(prog->getUniform("M"), 1, GL_FALSE, &M[0][0]);
-
 			glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, (void*)0);
-
 		}
+
 		glBindVertexArray(0);
-
-		
 		prog->unbind();
-
 	}
-
 };
+
 //******************************************************************************************
 int main(int argc, char **argv)
 {
 	std::string resourceDir = "../resources"; // Where the resources are loaded from
 	if (argc >= 2)
-	{
 		resourceDir = argv[1];
-	}
-
+	
+	srand(time(0));
 	Application *application = new Application();
 
 	/* your main will always include a similar set up to establish your window
 		and GL context, etc. */
 	WindowManager * windowManager = new WindowManager();
-	windowManager->init(1920, 1080);
+	windowManager->init(1000, 800);
 	windowManager->setEventCallbacks(application);
 	application->windowManager = windowManager;
 
